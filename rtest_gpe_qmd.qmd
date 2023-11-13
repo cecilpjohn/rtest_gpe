@@ -1,0 +1,386 @@
+---
+project:
+  type: website
+  output-dir: docs
+title: "R skills assessment"
+author: "Cecil Philip John"
+date: "November 12, 2023"
+execute:
+  warning: false
+format: 
+  html:
+    self-contained: true
+    toc: true
+    code-fold: true
+---
+
+#### Preliminaries
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+```
+
+```{r libraries}
+# Requisite libraries
+
+library(DT)
+library(tidyverse)
+```
+
+```{r data_path}
+
+# Data paths
+
+tag      <- "202311081903"
+base_url <- "https://github.com/randrescastaneda/pub_data/raw/"
+data_url <- paste0(base_url, tag, "/data/Rtest1/")
+
+
+wdi <-
+  read_rds(paste0(data_url, "wdi_in1.Rds"))
+
+```
+
+Requisite libraries and the data paths were setup.
+
+## 1. Summary statistics of GDP per capita by region
+
+```{r q1}
+
+wdi_a1 <- 
+wdi %>% 
+  drop_na(gdp, pop) %>%
+  group_by(region, date) %>% 
+  summarise(N = n(),
+            Mean = sum(gdp * pop) / sum(pop),
+            SD = sqrt(sum(pop * (gdp - (sum(gdp * pop) / sum(pop))) ^ 2) / 
+                                   sum(pop)),
+            Min = min(gdp),
+            Max = max(gdp)
+            ) %>% 
+  select(region, year = date, N, Mean, SD, Min, Max)
+
+wdi_a1 %>% 
+  datatable(filter = "top") %>% 
+  formatRound(c('N', 'Mean', 'SD', 'Min', 'Max'), digits = 0)
+```
+
+Comparing output with provided file.
+
+```{r waldo_q1}
+wdi_q1 <- 
+  read_rds(paste0(data_url, "wdi_summ_out.Rds"))
+
+waldo::compare(wdi_q1, wdi_a1)
+
+```
+
+## 2. Aggregate stats
+
+```{r q2}
+
+wdi_pop <- wdi %>% 
+  # drop_na(gdp, pop) %>%
+  group_by(region, date) %>% 
+  summarise(pop = sum(pop))
+
+wdi_a2 <- 
+  wdi %>% 
+  drop_na(gdp, pop) %>%
+  group_by(region, date) %>% 
+  summarise(across(c(lifeex, gdp, pov_intl),
+                   list(
+                     mean = ~ sum(.x * pop) / sum(pop), 
+                     sd = ~ sqrt(sum(pop * (.x - (sum(.x * pop) / sum(pop))) ^ 2) / 
+                                   sum(pop)), 
+                     median = ~ median(.x),
+                     min = ~ min(.x),
+                     max = ~ max(.x)),
+                   .names = "{col}__{fn}")) %>% 
+  pivot_longer(
+    cols = !c(region, date),
+    names_to = c('estimate'),
+    values_to = "value") %>% 
+  separate_wider_delim(estimate, 
+                       delim = "__", 
+                       names = c('measure', 'estimate')) %>% 
+  pivot_wider(names_from = measure, 
+              values_from = value) %>% 
+  left_join(wdi_pop, by = c("region", "date")) %>% 
+  select(estimate, region, date, pop, lifeex, gdp, pov_intl)
+
+wdi_a2 %>% 
+  datatable(filter = "top") %>%  
+  formatRound(c('lifeex', 'gdp', 'pov_intl'), 3)
+
+```
+
+Comparing output with reference.
+
+```{r waldo_q2}
+
+wdi_q2 <- 
+  read_rds(paste0(data_url, "wdi_agg_out.Rds"))
+
+waldo::compare(wdi_q2, wdi_a2)
+
+```
+
+## 3. Find outliers
+
+```{r q3}
+
+wdi_a3_1 <- 
+  wdi %>% 
+  # drop_na(gdp, pop) %>%
+  group_by(date) %>% 
+  summarise(across(c(lifeex, gdp, gini),
+                   list(
+                     mean = ~ sum(.x * pop) / sum(pop), 
+                     sd = ~ sqrt(sum(pop * (.x - (sum(.x * pop) / sum(pop))) ^ 2) / 
+                                   sum(pop))
+                   ),
+                   .names = "{fn}_{col}"))
+wdi_a3 <- 
+  wdi %>% 
+  left_join(wdi_a3_1, by = 'date') %>% 
+  mutate(hl_lifeex = if_else(
+    lifeex > (mean_lifeex + 2.5 * (sd_lifeex)), TRUE, FALSE, missing = NA),
+    
+    ll_lifeex = if_else(
+      lifeex < (mean_lifeex - 2.5 * (sd_lifeex)), TRUE, FALSE, missing = NA),
+    hl_gdp = if_else(
+      gdp > (mean_gdp + 2.5 * (sd_gdp)), TRUE, FALSE, missing = NA),
+    
+    ll_gdp = if_else(
+      gdp < (mean_gdp - 2.5 * (sd_gdp)), TRUE, FALSE, missing = NA),
+    hl_gini = if_else(
+      gini > (mean_gini + 2.5 * (sd_gini)), TRUE, FALSE, missing = NA),
+    
+    ll_gini = if_else(
+      gini < (mean_gini - 2.5 * (sd_gini)), TRUE, FALSE, missing = NA)) 
+
+
+```
+
+Lifeexp plot
+
+```{r q3_plot}
+
+wdi_a3 %>% 
+  ggplot() +
+  geom_ribbon(aes(x = date, 
+                  ymin = mean_lifeex + 2.5 * (sd_lifeex), 
+                  ymax = mean_lifeex - 2.5 * (sd_lifeex)), 
+              alpha = 0.3) +
+  geom_point(aes(x = date, 
+                 y = lifeex, 
+                 color = region)) +
+  geom_line(aes(x = date, 
+                y = mean_lifeex)) +
+  labs(y = 'mean_lifeex') +
+  theme_minimal() +
+  theme(legend.title = element_blank(),
+        legend.position = c(0.5,
+                            0.2))+
+          guides(color = guide_legend(nrow = 3, 
+                                      byrow = TRUE))
+```
+
+Compare output with reference
+
+```{r waldo_q3}
+wdi_q3 <- 
+  read_rds(paste0(data_url, "wdi_outliers_out.Rds"))
+
+
+```
+
+# Simulate data
+
+```{r sim_data}
+l_svy <-
+    readr::read_rds(paste0(data_url, "svy_sim_in1.Rds"))
+```
+
+## 4. Poverty measures
+
+```{r q4}
+
+q4 <- 
+  readr::read_rds(paste0(data_url, "dt_pov_out.Rds"))
+
+```
+
+```{r}
+
+# function mdified from 
+# https://rdrr.io/github/antrologos/inequalityTools/src/R/poverty_fgt.R#sym-poverty_fgt
+
+calculate_fgt <- function(df, z, alpha) {
+  df %>%
+    mutate(g = ifelse(income < z, ((z - income)/z), 0),
+           fgt = ifelse(income < z, g^alpha, 0)) %>%
+    summarise(fgt = sum(weight * fgt),
+              n = sum(weight), 
+              value = fgt/n) %>% 
+    pull(value)
+}
+
+alpha <- 0
+
+# iteration 0-2.15
+
+
+z <- 2.15
+
+headcount_1 <- 
+  as.data.frame(map(l_svy, ~ calculate_fgt(.x, z, alpha))) %>% 
+  t() %>% 
+  as.data.frame() %>%
+  rownames_to_column(var = "year") %>% 
+  mutate(pov_line = z) %>% 
+  select(year, pov_line, headcount = V1)
+
+# iteration 0-3.65
+
+z <- 3.65
+
+headcount_2 <- 
+  as.data.frame(map(l_svy, ~ calculate_fgt(.x, z, alpha))) %>% 
+  t() %>% 
+  as.data.frame() %>%
+  rownames_to_column(var = "year") %>% 
+  mutate(pov_line = z) %>% 
+  select(year, pov_line, headcount = V1)
+
+headcount <- bind_rows(headcount_1,headcount_2)
+
+# iteration 0-6.85
+
+z <- 6.85
+
+headcount_3 <- 
+  as.data.frame(map(l_svy, ~ calculate_fgt(.x, z, alpha))) %>% 
+  t() %>% 
+  as.data.frame() %>%
+  rownames_to_column(var = "year") %>% 
+  mutate(pov_line = z) %>% 
+  select(year, pov_line, headcount = V1)
+
+headcount <- bind_rows(headcount,headcount_3)
+
+#####
+
+alpha <- 1
+
+# iteration 0-2.15
+
+
+z <- 2.15
+
+povgap_1 <- 
+  as.data.frame(map(l_svy, ~ calculate_fgt(.x, z, alpha))) %>% 
+  t() %>% 
+  as.data.frame() %>%
+  rownames_to_column(var = "year") %>% 
+  mutate(pov_line = z) %>% 
+  select(year, pov_line, povgap = V1)
+
+# iteration 0-3.65
+
+z <- 3.65
+
+povgap_2 <- 
+  as.data.frame(map(l_svy, ~ calculate_fgt(.x, z, alpha))) %>% 
+  t() %>% 
+  as.data.frame() %>%
+  rownames_to_column(var = "year") %>% 
+  mutate(pov_line = z) %>% 
+  select(year, pov_line, povgap = V1)
+
+povgap <- bind_rows(povgap_1,povgap_2)
+
+# iteration 0-6.85
+
+z <- 6.85
+
+povgap_3 <- 
+  as.data.frame(map(l_svy, ~ calculate_fgt(.x, z, alpha))) %>% 
+  t() %>% 
+  as.data.frame() %>%
+  rownames_to_column(var = "year") %>% 
+  mutate(pov_line = z) %>% 
+  select(year, pov_line, povgap = V1)
+
+povgap <- bind_rows(povgap,povgap_3)
+
+
+####
+
+alpha <- 2
+
+# iteration 0-2.15
+
+
+z <- 2.15
+
+povseverity_1 <- 
+  as.data.frame(map(l_svy, ~ calculate_fgt(.x, z, alpha))) %>% 
+  t() %>% 
+  as.data.frame() %>%
+  rownames_to_column(var = "year") %>% 
+  mutate(pov_line = z) %>% 
+  select(year, pov_line, povseverity = V1)
+
+# iteration 0-3.65
+
+z <- 3.65
+
+povseverity_2 <- 
+  as.data.frame(map(l_svy, ~ calculate_fgt(.x, z, alpha))) %>% 
+  t() %>% 
+  as.data.frame() %>%
+  rownames_to_column(var = "year") %>% 
+  mutate(pov_line = z) %>% 
+  select(year, pov_line, povseverity = V1)
+
+povseverity <- bind_rows(povseverity_1,povseverity_2)
+
+# iteration 0-6.85
+
+z <- 6.85
+
+povseverity_3 <- 
+  as.data.frame(map(l_svy, ~ calculate_fgt(.x, z, alpha))) %>% 
+  t() %>% 
+  as.data.frame() %>%
+  rownames_to_column(var = "year") %>% 
+  mutate(pov_line = z) %>% 
+  select(year, pov_line, povseverity = V1)
+
+povseverity <- bind_rows(povseverity, povseverity_3)
+
+pov_measure <- 
+  left_join(headcount, povgap, by = c("year", "pov_line")) %>% 
+  left_join(povseverity, by = c("year", "pov_line")) %>% 
+  mutate_at("year", str_replace, "Y", "")
+
+pov_measure %>% 
+  datatable(filter = "top") #%>% 
+  #formatRound(c('headcount', 'povgap', 'povseverity'), digits = 16)
+
+
+```
+
+```{r}
+pov_measure %>% 
+  ggplot(aes(x = year, y = headcount, group = as.factor(pov_line))) +
+  geom_line(aes(color = as.factor(pov_line))) +
+  geom_point(aes(color = as.factor(pov_line))) +
+  theme_minimal() +
+  theme(legend.title = element_blank(),
+        legend.position = "bottom")
+```
