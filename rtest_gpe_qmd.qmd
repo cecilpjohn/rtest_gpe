@@ -45,6 +45,8 @@ wdi <-
 
 Requisite libraries and the data paths were setup.
 
+# Basic Stats
+
 ## 1. Summary statistics of GDP per capita by region
 
 ```{r q1}
@@ -58,8 +60,7 @@ wdi %>%
             SD = sqrt(sum(pop * (gdp - (sum(gdp * pop) / sum(pop))) ^ 2) / 
                                    sum(pop)),
             Min = min(gdp),
-            Max = max(gdp)
-            ) %>% 
+            Max = max(gdp)) %>% 
   select(region, year = date, N, Mean, SD, Min, Max)
 
 wdi_a1 %>% 
@@ -82,7 +83,6 @@ waldo::compare(wdi_q1, wdi_a1)
 ```{r q2}
 
 wdi_pop <- wdi %>% 
-  # drop_na(gdp, pop) %>%
   group_by(region, date) %>% 
   summarise(pop = sum(pop))
 
@@ -134,15 +134,16 @@ waldo::compare(wdi_q2, wdi_a2)
 
 wdi_a3_1 <- 
   wdi %>% 
-  # drop_na(gdp, pop) %>%
   group_by(date) %>% 
   summarise(across(c(lifeex, gdp, gini),
                    list(
                      mean = ~ sum(.x * pop) / sum(pop), 
                      sd = ~ sqrt(sum(pop * (.x - (sum(.x * pop) / sum(pop))) ^ 2) / 
-                                   sum(pop))
-                   ),
+                                   sum(pop))),
                    .names = "{fn}_{col}"))
+
+# Add columns that indicate whether the given liffex value falls within the 2.5 CI range
+
 wdi_a3 <- 
   wdi %>% 
   left_join(wdi_a3_1, by = 'date') %>% 
@@ -195,7 +196,7 @@ Compare output with reference
 wdi_q3 <- 
   read_rds(paste0(data_url, "wdi_outliers_out.Rds"))
 
-
+waldo::compare(wdi_q3, wdi_a3)
 ```
 
 # Simulate data
@@ -207,16 +208,9 @@ l_svy <-
 
 ## 4. Poverty measures
 
-```{r q4}
-
-q4 <- 
-  readr::read_rds(paste0(data_url, "dt_pov_out.Rds"))
-
-```
-
 ```{r}
 
-# function mdified from 
+# function modified from 
 # https://rdrr.io/github/antrologos/inequalityTools/src/R/poverty_fgt.R#sym-poverty_fgt
 
 calculate_fgt <- function(df, z, alpha) {
@@ -276,7 +270,7 @@ headcount <- bind_rows(headcount,headcount_3)
 
 alpha <- 1
 
-# iteration 0-2.15
+# iteration 1-2.15
 
 
 z <- 2.15
@@ -289,7 +283,7 @@ povgap_1 <-
   mutate(pov_line = z) %>% 
   select(year, pov_line, povgap = V1)
 
-# iteration 0-3.65
+# iteration 1-3.65
 
 z <- 3.65
 
@@ -303,7 +297,7 @@ povgap_2 <-
 
 povgap <- bind_rows(povgap_1,povgap_2)
 
-# iteration 0-6.85
+# iteration 1-6.85
 
 z <- 6.85
 
@@ -322,7 +316,7 @@ povgap <- bind_rows(povgap,povgap_3)
 
 alpha <- 2
 
-# iteration 0-2.15
+# iteration 2-2.15
 
 
 z <- 2.15
@@ -335,7 +329,7 @@ povseverity_1 <-
   mutate(pov_line = z) %>% 
   select(year, pov_line, povseverity = V1)
 
-# iteration 0-3.65
+# iteration 2-3.65
 
 z <- 3.65
 
@@ -349,7 +343,7 @@ povseverity_2 <-
 
 povseverity <- bind_rows(povseverity_1,povseverity_2)
 
-# iteration 0-6.85
+# iteration 2-6.85
 
 z <- 6.85
 
@@ -366,12 +360,11 @@ povseverity <- bind_rows(povseverity, povseverity_3)
 pov_measure <- 
   left_join(headcount, povgap, by = c("year", "pov_line")) %>% 
   left_join(povseverity, by = c("year", "pov_line")) %>% 
-  mutate_at("year", str_replace, "Y", "")
+  mutate_at("year", str_replace, "Y", "") %>% 
+  arrange(year, pov_line)
 
 pov_measure %>% 
-  datatable(filter = "top") #%>% 
-  #formatRound(c('headcount', 'povgap', 'povseverity'), digits = 16)
-
+  datatable(filter = "top") 
 
 ```
 
@@ -383,4 +376,11 @@ pov_measure %>%
   theme_minimal() +
   theme(legend.title = element_blank(),
         legend.position = "bottom")
+```
+
+```{r}
+sim_4 <- 
+  readr::read_rds(paste0(data_url, "dt_pov_out.Rds"))
+
+waldo::compare(sim_4, pov_measure)
 ```
